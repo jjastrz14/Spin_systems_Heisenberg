@@ -7,11 +7,13 @@
 ####
 
 
-import numpy as np 
+import numpy as np
 import Heisenberg_chain
 import Plotting_writing
 from itertools import groupby
 from collections import Counter
+
+TRACE_TOLERANCE = 1e-12
 
 
         
@@ -33,14 +35,17 @@ if __name__ == '__main__':
             #4 sites open
             #adjMatrix = np.array([[0,1,0,0],[0,0,1,0],[0,0,0,1],[0,0,0,0]])
 
-    size_of_the_chain = 2
-    
-    adjMatrix = np.eye(size_of_the_chain, k=1, dtype=int)[::]
-    adjMatrix[-1][0] = 1
-    #above matrix for size = 4 is : #adjMatrix = np.array([[0,1,0,0],[0,0,1,0],[0,0,0,1],[1,0,0,0]])
+    size_of_the_chain = 14
+    boundary = "PBC"  # "PBC" = periodic (closed), "OBC" = open
+    S = 1/2 #spin number
+    model = "Heisenberg"  # "Heisenberg" or "AKLT"
+
+    adjMatrix = np.eye(size_of_the_chain, k=1, dtype=int)
+    if boundary == "PBC":
+        adjMatrix[-1][0] = 1
+    print(f"Boundary conditions: {boundary}")
     print("This is adjacency Matrix : \n", adjMatrix)
     
-    S = 1 #spin number 
     N = len(adjMatrix) #size of the system
     print("Calculating N = " + str(N)  + " system for S = " + str(S))
     
@@ -53,11 +58,15 @@ if __name__ == '__main__':
     print("Basis S_z: ", basis_H_s_z)
     print("List of possible values of S_z: ", spins)
     print("Dictionary of spin z occurances: ", Counter(basis_H_s_z).values() )
-    H.create_Hamiltonian(adjMatrix)
+    if model == "AKLT":
+        H.create_Hamiltonian_AKLT(adjMatrix)
+    else:
+        H.create_Hamiltonian(adjMatrix)
     
     print(H.H)
     all_energies = []
     entropy_all_system = []
+    entropy_raw_all = []
     eigen_rho_sys_all = []
     s_z_number = []
     s_z_lambdas = []
@@ -97,7 +106,7 @@ if __name__ == '__main__':
             #print(f"This is energy {energies[j]}")   
             #print(f"This is vectors {vectors[:,j]}")
 
-            psi = np.zeros(shape=(len(subsystem_A),len(subsystem_B)), dtype = float) #should deal only with floats
+            psi = np.zeros(shape=(len(subsystem_A),len(subsystem_B)), dtype = complex)
             for k,v in enumerate(vectors[:,j]):
                 #print(f"This is {v}")
                 psi[new_basis[k][0]][new_basis[k][1]] = v #0 and 1 becasue it's a matrix 
@@ -112,20 +121,18 @@ if __name__ == '__main__':
             #print(f"This len is rho vector {j}: \n", len(rho))
             
             #trace calculation
-            if not .9999999999999 <= np.trace(rho) <= 1.000000000001:
+            if abs(np.trace(rho) - 1.0) > TRACE_TOLERANCE:
                     print("Trace of the system: ", np.trace(rho))
             
             #entropy
-            entropy_sys, eigen_rho_sys = H.calculate_entropy(rho, size_of_sub_A) #change to saving the lambdas
+            entropy_sys, entropy_raw, eigen_rho_sys = H.calculate_entropy(rho, size_of_sub_A)
             #print(f"This is entropy of j-th {j} energy {energies[j]} with spin S_z {spins[i]} : {entropy_sys}")
             sum_entropy += entropy_sys
-            
+
             #print(f"Lambdas : {eigen_rho_sys}")
-            
-            #[print(" lambdas: ", eigen_rho_sys[i]) for i  in range(len(eigen_rho_sys))]
-            #[print("Complex lambdas: ", eigen_rho_sys[i]) for i  in range(len(eigen_rho_sys)) if eigen_rho_sys[i].imag <= 10e-8]
-            
+
             entropy_all_system.append(entropy_sys)
+            entropy_raw_all.append(entropy_raw)
             s_z_number.append(spins[i])
             
             s_z_lambdas.append([spins[i]]*len(eigen_rho_sys))
@@ -137,9 +144,9 @@ if __name__ == '__main__':
 
         all_energies.append(energies)
 
-        for i in range(len(eigen_rho_sys_all)):
-                sum_lambdas.append(sum(eigen_rho_sys_all[i]))
-        
+    for k in range(len(eigen_rho_sys_all)):
+            sum_lambdas.append(sum(eigen_rho_sys_all[k]))
+
     print(psi_shape)      
         
     #print(sum_lambdas)
@@ -156,15 +163,14 @@ if __name__ == '__main__':
         
     
     #class initialization
-    Plotting = Plotting_writing.Plots(S, directory = "./results/results_" + str(len(adjMatrix)) + "_sites_" + S_save)
+    Plotting = Plotting_writing.Plots(S, directory = "./results/results_" + model + "_" + str(len(adjMatrix)) + "_sites_" + S_save + "_" + boundary)
         
-    energies_entropies = [all_energies, entropy_all_system, s_z_number]
-    Plotting.save_to_csv(energies_entropies, name = "/entropy_" + S_save + "_" + str(N), header = "Energies Entropies S_z", real = True)
-    
+    results = [all_energies, entropy_all_system, entropy_raw_all, s_z_number, sum_lambdas]
+    Plotting.save_to_csv(results, name = "/results_" + S_save + "_" + str(N),
+                         header = "Energy Entropy_normalized Entropy_raw S_z Sum_lambdas", real = True)
+
     lambdas = np.column_stack([np.concatenate(eigen_rho_sys_all, axis = 0) , np.concatenate(s_z_lambdas)])
     Plotting.save_to_csv_without_transpose(lambdas, name = "/lambdas_" + S_save + "_" + str(N), header = "Lambdas S_z", real = True)
-    
-    Plotting.save_to_csv(sum_lambdas, name = "/sum_lambdas_" + S_save + "_" + str(N), header = "Sum", real = True)
     print("Writing to files done")
     
     
@@ -177,15 +183,16 @@ if __name__ == '__main__':
         ticks = True 
     else: ticks = False
     
-    #plots of energy bands 
-    Plotting.plot_bands(np.sort(all_energies), title = ", " +str(N) +" sites, graph", figsize=(10,12),s=550, ticks = ticks, suffix = str(N) +"_sites_chain")
-    #Plotting.plot_bands_with_s_z(np.around(S_z_total,0), title = ", " + str(N+1) +" sites, graph", figsize=(10,12),s=550, ticks = True, suffix = str(N+1) +"S_z_sites_chain")
-    Plotting.plot_s_z(sorted(basis_H_s_z), all_energies, color = 'dodgerblue', title = ", " + str(N) +" sites, graph", figsize=(10,12),s=550, suffix = str(N) +"_sites_Sz")
-    Plotting.plot_entropy(all_energies, entropy_all_system, color = 'red', title = ", " + str(N) +" sites, system ", figsize=(10,12),s=550, suffix = str(N) + "_sys_entropy")
-    #Plotting.plot_entropy(entropy_all_env, color = 'blue', title = ", " + str(N+1) +" sites, environment ", figsize=(10,12),s=550, suffix = str(N+1) + "_env_entropy")
-    #Plotting.plot_lambdas_entropy(eigen_rho_env_all, color = 'black', title = ", lambda, " + str(N+1) +" sites, env ", figsize=(10,12),s=400, suffix = str(N+1) + "_env_lambda")
-    Plotting.plot_lambdas_entropy(eigen_rho_sys_all, color = 'black', title = ", lambda, " + str(N) +" sites, sys ", figsize=(10,12),s=400, suffix = str(N) + "_sys_lambda")
-    print("Plotting of bands done") 
+    if N <= 6: 
+        #plots of energy bands 
+        Plotting.plot_bands(np.sort(all_energies), title = ", " +str(N) +" sites, graph", figsize=(10,12),s=550, ticks = ticks, suffix = str(N) +"_sites_chain")
+        #Plotting.plot_bands_with_s_z(np.around(S_z_total,0), title = ", " + str(N+1) +" sites, graph", figsize=(10,12),s=550, ticks = True, suffix = str(N+1) +"S_z_sites_chain")
+        Plotting.plot_s_z(sorted(basis_H_s_z), all_energies, color = 'dodgerblue', title = ", " + str(N) +" sites, graph", figsize=(10,12),s=550, suffix = str(N) +"_sites_Sz")
+        Plotting.plot_entropy(all_energies, entropy_all_system, color = 'red', title = ", " + str(N) +" sites, system ", figsize=(10,12),s=550, suffix = str(N) + "_sys_entropy")
+        #Plotting.plot_entropy(entropy_all_env, color = 'blue', title = ", " + str(N+1) +" sites, environment ", figsize=(10,12),s=550, suffix = str(N+1) + "_env_entropy")
+        #Plotting.plot_lambdas_entropy(eigen_rho_env_all, color = 'black', title = ", lambda, " + str(N+1) +" sites, env ", figsize=(10,12),s=400, suffix = str(N+1) + "_env_lambda")
+        Plotting.plot_lambdas_entropy(eigen_rho_sys_all, color = 'black', title = ", lambda, " + str(N) +" sites, sys ", figsize=(10,12),s=400, suffix = str(N) + "_sys_lambda")
+        print("Plotting of bands done") 
 
     
     print("Success")
