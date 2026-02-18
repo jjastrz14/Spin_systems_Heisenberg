@@ -277,12 +277,10 @@ class Heisenberg(object):
         H_dense = self.H.toarray() if scipy.sparse.issparse(self.H) else self.H
         block_H_spin = H_dense[np.ix_(row_indices, row_indices)]
 
-        print(block_H_spin)
+        print(f"Block S_z={target_spin}: size {block_H_spin.shape[0]}x{block_H_spin.shape[1]}")
 
-        #print(f"this is  a block for {iterator} \n ", block_H_spin)
-        #print(f"Is symmetric?", np.allclose(block_H_spin, block_H_spin.T, rtol=10e-5, atol=10e-8))
-
-        #print(f"This is spin_basis {spin_basis}")
+        if self.size_of_system <= 6:
+            print(block_H_spin)
 
         energies, vectors = self.eig_diagonalize(block_H_spin)
 

@@ -35,7 +35,7 @@ if __name__ == '__main__':
             #4 sites open
             #adjMatrix = np.array([[0,1,0,0],[0,0,1,0],[0,0,0,1],[0,0,0,0]])
 
-    size_of_the_chain = 14
+    size_of_the_chain = 8
     boundary = "PBC"  # "PBC" = periodic (closed), "OBC" = open
     S = 1/2 #spin number
     model = "Heisenberg"  # "Heisenberg" or "AKLT"
@@ -43,8 +43,10 @@ if __name__ == '__main__':
     adjMatrix = np.eye(size_of_the_chain, k=1, dtype=int)
     if boundary == "PBC":
         adjMatrix[-1][0] = 1
+    verbose = size_of_the_chain <= 6
     print(f"Boundary conditions: {boundary}")
-    print("This is adjacency Matrix : \n", adjMatrix)
+    if verbose:
+        print("This is adjacency Matrix : \n", adjMatrix)
     
     N = len(adjMatrix) #size of the system
     print("Calculating N = " + str(N)  + " system for S = " + str(S))
@@ -54,8 +56,8 @@ if __name__ == '__main__':
     
     basis_H, basis_H_s_z, spins = H.calculate_basis()
 
-    #print("Basis H: ", basis_H)
-    print("Basis S_z: ", basis_H_s_z)
+    if verbose:
+        print("Basis S_z: ", basis_H_s_z)
     print("List of possible values of S_z: ", spins)
     print("Dictionary of spin z occurances: ", Counter(basis_H_s_z).values() )
     if model == "AKLT":
@@ -63,7 +65,8 @@ if __name__ == '__main__':
     else:
         H.create_Hamiltonian(adjMatrix)
     
-    print(H.H)
+    if verbose:
+        print(H.H)
     all_energies = []
     entropy_all_system = []
     entropy_raw_all = []
@@ -86,10 +89,8 @@ if __name__ == '__main__':
     for i , spin in enumerate(spins):
         energies, vectors, spin_basis = H.block_Hamiltonian(i)
         
-        print(spin)
-            
-                
-        print("S_z = " + str(spins[i]) + " start")
+        if verbose:
+            print(f"S_z = {spins[i]} start")
         #print(f"Spin basis: {spin_basis}")
         
         #calculation of new basis
@@ -147,7 +148,8 @@ if __name__ == '__main__':
     for k in range(len(eigen_rho_sys_all)):
             sum_lambdas.append(sum(eigen_rho_sys_all[k]))
 
-    print(psi_shape)      
+    if verbose:
+        print(psi_shape)
         
     #print(sum_lambdas)
                 
