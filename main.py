@@ -12,33 +12,36 @@ import Heisenberg_chain
 import Plotting_writing
 from itertools import groupby
 from collections import Counter
+import argparse
+import math
 
 TRACE_TOLERANCE = 1e-12
 
 
-        
+
 if __name__ == '__main__':
 
     ######## Heisenberg Graph #########
-    '''                                                                    
-    Program for calculating and diagonalization of Heisenberg Hamiltonian for graph with defined adjacency matrix                               # 
+    '''
+    Program for calculating and diagonalization of Heisenberg Hamiltonian for graph with defined adjacency matrix                               #
     # class Graph - define graph, class Heisenberg - calculation of H
     # here you can creating a graph using add_edge methods or declare prepared matrix (adjMatrix).                                              #
-    # N is a size of the system # 
+    # N is a size of the system #
     '''
-    #sites = [4,6,8,10]
-    #sites = [4,6,7,8,9]
-    #for i in sites:
-            #in this code it's enough to define one "hopping", becasue the second one is already implemented in the code
-            #make above note more precise! 
-            
-            #4 sites open
-            #adjMatrix = np.array([[0,1,0,0],[0,0,1,0],[0,0,0,1],[0,0,0,0]])
 
-    size_of_the_chain = 8
-    boundary = "PBC"  # "PBC" = periodic (closed), "OBC" = open
-    S = 1/2 #spin number
-    model = "Heisenberg"  # "Heisenberg" or "AKLT"
+    parser = argparse.ArgumentParser(description="Heisenberg / AKLT spin chain diagonalization")
+    parser.add_argument("-N", "--sites", type=int, default=8, help="Number of sites in the chain")
+    parser.add_argument("-S", "--spin", type=float, default=0.5, help="Spin value: 0.5 or 1")
+    parser.add_argument("-b", "--boundary", type=str, default="PBC", choices=["PBC", "OBC"],
+                        help="Boundary conditions: PBC (periodic) or OBC (open)")
+    parser.add_argument("-m", "--model", type=str, default="Heisenberg", choices=["Heisenberg", "AKLT"],
+                        help="Model: Heisenberg or AKLT")
+    args = parser.parse_args()
+
+    size_of_the_chain = args.sites
+    boundary = args.boundary
+    S = args.spin
+    model = args.model
 
     adjMatrix = np.eye(size_of_the_chain, k=1, dtype=int)
     if boundary == "PBC":
@@ -76,8 +79,8 @@ if __name__ == '__main__':
     sum_lambdas = []
     psi_shape = []
     
-    #n_of_sites = int(len(adjMatrix)/2)
-    size_of_sub_A = int(len(adjMatrix)/2)
+    # For odd N: A gets the extra site (A >= B)
+    size_of_sub_A = math.ceil(N / 2)
     size_of_sub_B = N - size_of_sub_A
     
     print(f"This is size A {size_of_sub_A}")
