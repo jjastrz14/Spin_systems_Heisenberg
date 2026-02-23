@@ -27,16 +27,16 @@ class Plots(object):
         def save_to_csv(self, x , name, header, real = False):
             
             if real == True: 
-                np.savetxt(self.directory + str(name) + '.csv', np.transpose(np.real(x)), fmt='%.10f', delimiter=' ', header = header)
+                np.savetxt(self.directory + str(name) + '.csv', np.transpose(np.real(x)), delimiter=',', header = header)
             else: 
-                np.savetxt(self.directory + str(name) + '.csv', np.transpose(x), fmt='%.10f', delimiter=' ', header = header)
+                np.savetxt(self.directory + str(name) + '.csv', np.transpose(x), delimiter=',', header = header)
 
         def save_to_csv_without_transpose(self, x , name, header, real = False):
             
             if real == True: 
-                np.savetxt(self.directory + str(name) + '.csv', np.real(x), fmt='%.10f', delimiter=' ', header = header)
+                np.savetxt(self.directory + str(name) + '.csv', np.real(x), delimiter=',', header = header)
             else: 
-                np.savetxt(self.directory + str(name) + '.csv', x, fmt='%.10f', delimiter=' ', header = header)
+                np.savetxt(self.directory + str(name) + '.csv', x, delimiter=',', header = header)
 
         
         
