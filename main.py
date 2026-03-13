@@ -172,7 +172,7 @@ if __name__ == '__main__':
         
     results = [all_energies, entropy_all_system, entropy_raw_all, s_z_number, sum_lambdas]
     Plotting.save_to_csv(results, name = "/results_" + S_save + "_" + str(N),
-                         header = "Energy Entropy_normalized Entropy_raw S_z Sum_lambdas", real = True)
+                        header = "Energy, Entropy_normalized, Entropy_raw, S_z, Sum_lambdas", real = True)
 
     #lambdas = np.column_stack([np.concatenate(eigen_rho_sys_all, axis = 0) , np.concatenate(s_z_lambdas)])
     #Plotting.save_to_csv_without_transpose(lambdas, name = "/lambdas_" + S_save + "_" + str(N), header = "Lambdas S_z", real = True)
