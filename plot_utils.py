@@ -7,7 +7,7 @@ import matplotlib.cm as cm
 
 # function to plot Entropy against eigenvalue with cmap of Sz
 # mode='leq' filters S_z <= sz_filter, mode='eq' filters S_z == sz_filter
-def plot_entropy_against_eigenvalue(filepath, figsize=(8, 6), sz_filter=0, mode='leq', figpath=None, entropy='normalized'):
+def plot_entropy_against_eigenvalue(filepath, figsize=(8, 6), sz_filter=0, mode='leq', figpath=None, entropy='normalized', yticks=None, dpi=100, n_lowest=None):
     # entropy: 'normalized' (col 1) or 'raw' (col 2)
     try:
         data = np.loadtxt(filepath, delimiter=',')
@@ -18,9 +18,6 @@ def plot_entropy_against_eigenvalue(filepath, figsize=(8, 6), sz_filter=0, mode=
     entropies = data[:, entropy_col]
     sz = data[:, 3]
 
-    # store full S_z range for consistent color normalization
-    sz_min, sz_max = sz.min(), sz.max()
-
     if mode == 'eq':
         mask = np.isclose(sz, sz_filter)
     else:
@@ -29,14 +26,25 @@ def plot_entropy_against_eigenvalue(filepath, figsize=(8, 6), sz_filter=0, mode=
     entropies = entropies[mask]
     sz = sz[mask]
 
+    if n_lowest is not None:
+        keep = np.zeros(len(sz), dtype=bool)
+        for sz_val in np.unique(sz):
+            sz_mask = np.isclose(sz, sz_val)
+            indices = np.where(sz_mask)[0]
+            sorted_indices = indices[np.argsort(energies[indices])][:n_lowest]
+            keep[sorted_indices] = True
+        energies = energies[keep]
+        entropies = entropies[keep]
+        sz = sz[keep]
+
     # use integer S_z if all values are whole numbers
     all_integer = np.all(np.isclose(sz, np.round(sz)))
     if all_integer:
         sz = np.round(sz).astype(int)
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
     sc = ax.scatter(energies, entropies, c=sz, cmap='viridis', edgecolors='k', linewidths=0.01,
-                    vmin=sz_min, vmax=sz_max)
+                    vmin=sz.min(), vmax=sz.max())
     if mode != 'eq':
         cbar = plt.colorbar(sc, ax=ax)
         if all_integer:
@@ -44,10 +52,12 @@ def plot_entropy_against_eigenvalue(filepath, figsize=(8, 6), sz_filter=0, mode=
         cbar.set_label(r'$S_z$')
     ax.set_xlabel(r'Eigenvalue $E$')
     ax.set_ylabel(r'Entropy $S$')
+    if yticks is not None:
+        ax.set_yticks(yticks)
     ax.tick_params(direction='in', which='both')
     plt.tight_layout()
     if figpath:
-        plt.savefig(figpath)
+        plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
     plt.show()
     
     
