@@ -159,3 +159,70 @@ def plot_entropy_sum_vs_chain_size(filepaths_and_sizes, sz_values, figsize=(8, 6
     if figpath:
         plt.savefig(figpath, dpi=500, bbox_inches='tight')
     plt.show()
+
+
+def print_lowest_energies(filepaths, n=10, figsize=(8, 5), figpath=None, dpi=100, xlim=None, ylim=None):
+    """Print and plot n lowest eigenvalues from multiple result files.
+
+    filepaths: dict of {label: filepath} or list of (label, filepath) tuples.
+    """
+    if isinstance(filepaths, dict):
+        filepaths = list(filepaths.items())
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    #cmap = plt.colormaps.get_cmap('tab10')
+
+    for idx, (label, filepath) in enumerate(filepaths):
+        try:
+            data = np.loadtxt(filepath, delimiter=',')
+        except ValueError:
+            data = np.loadtxt(filepath)
+        energies = np.sort(np.real(data[:, 0]))
+        lowest = energies[:n]
+
+        print(f"\n{label}  ({len(energies)} total states)")
+        print(f"  {'i':>3}  {'E':>12}")
+        print(f"  {'---':>3}  {'---':>12}")
+        for i, e in enumerate(lowest):
+            print(f"  {i:>3}  {e:>12.6f}")
+
+        #color = cmap(idx / max(len(filepaths) - 1, 1))
+        ax.scatter(range(len(lowest)), lowest, label=label, s=30, zorder=2) #color=color
+
+    ax.set_xlabel('Index')
+    ax.set_ylabel('Energy $E$')
+    ax.set_title(f'{n} lowest eigenvalues')
+    ax.legend(fontsize='small')
+    ax.tick_params(direction='in', which='both')
+    ax.grid(True, linestyle='--', alpha=0.25)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    plt.tight_layout()
+    if figpath:
+        plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
+    plt.show()
+    
+def print_energies_momentum(filepath, figsize=(4.5,5.5), dpi=100):
+    """Print and plot eigenvalues from momentum results file."""
+    data = np.loadtxt(filepath, delimiter=',')
+    energies = data[:, 0]
+    k_values = data[:, 2]
+    sz_values = data[:, 3]
+    
+    print(f"\nMomentum eigenvalues ({len(energies)} total states)")
+    print(f"  {'k':>12}  {'E':>12}")
+    print(f"  {'---':>12}  {'---':>12}")
+    for k, e in zip(k_values, energies):
+        print(f"  {k:>12.6f}  {e:>12.6f}")
+    
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    ax.scatter(k_values, energies, c = sz_values, cmap='magma', s=30, zorder=2)
+    ax.set_xlabel('Momentum $k$')
+    ax.set_ylabel('Energy $E$')
+    ax.set_title('Momentum Eigenvalues')
+    ax.grid(True, linestyle='--', alpha=0.25)
+    
+    plt.tight_layout()
+    plt.show()
