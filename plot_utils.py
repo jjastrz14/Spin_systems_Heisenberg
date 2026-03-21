@@ -59,8 +59,74 @@ def plot_entropy_against_eigenvalue(filepath, figsize=(8, 6), sz_filter=0, mode=
     if figpath:
         plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
     plt.show()
-    
-    
+
+
+def plot_momentum_entropy(filepath, figsize=(8, 6), sz_filter=None, figpath=None, entropy='normalized', yticks=None, dpi=100, n_lowest=None):
+    """Plot entropy vs energy from momentum CSV, colored by k/pi.
+
+    Momentum CSV columns: Energy(0), S_z(1), k(2), k_over_pi(3), Entropy_norm(4), Entropy_raw(5)
+    sz_filter: if set, show only states with that S_z value.
+    """
+    try:
+        data = np.loadtxt(filepath, delimiter=',')
+    except ValueError:
+        data = np.loadtxt(filepath)
+    energies = data[:, 0]
+    sz = data[:, 1]
+    k_over_pi = data[:, 3]
+    entropy_col = 4 if entropy == 'normalized' else 5
+    entropies = data[:, entropy_col]
+
+    if sz_filter is not None:
+        mask = np.isclose(sz, sz_filter)
+        energies = energies[mask]
+        entropies = entropies[mask]
+        k_over_pi = k_over_pi[mask]
+        sz = sz[mask]
+
+    if n_lowest is not None:
+        sorted_indices = np.argsort(energies)[:n_lowest]
+        energies = energies[sorted_indices]
+        entropies = entropies[sorted_indices]
+        k_over_pi = k_over_pi[sorted_indices]
+        sz = sz[sorted_indices]
+
+    # Spread degenerate points horizontally so each dot is visible
+    e_plot = energies.copy()
+    e_round = np.round(energies, 6)
+    s_round = np.round(entropies, 6)
+    spread = 0.06 * (energies.max() - energies.min()) if energies.max() != energies.min() else 0.06
+    visited = {}
+    for i in range(len(e_plot)):
+        key = (e_round[i], s_round[i])
+        if key not in visited:
+            visited[key] = []
+        visited[key].append(i)
+    for key, indices in visited.items():
+        n = len(indices)
+        if n > 1:
+            offsets = np.linspace(-spread * (n - 1) / 2, spread * (n - 1) / 2, n)
+            for j, idx in enumerate(indices):
+                e_plot[idx] += offsets[j]
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    sc = ax.scatter(e_plot, entropies, c=k_over_pi, cmap='coolwarm', edgecolors='k', linewidths=0.3,
+                    vmin=k_over_pi.min(), vmax=k_over_pi.max())
+    cbar = plt.colorbar(sc, ax=ax)
+    unique_k = np.unique(np.round(k_over_pi, 6))
+    cbar.set_ticks(unique_k)
+    cbar.set_label(r'$k/\pi$')
+    ax.set_xlabel(r'Eigenvalue $E$')
+    ax.set_ylabel(r'Entropy $S$')
+    if yticks is not None:
+        ax.set_yticks(yticks)
+    ax.tick_params(direction='in', which='both')
+    plt.tight_layout()
+    if figpath:
+        plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
+    plt.show()
+
+
 # Plot sum of entropies for a given S_z value against chain size
 # filepaths_and_sizes: list of (filepath, chain_size) tuples
 # sz_values: single S_z value or list of S_z values to plot
@@ -204,25 +270,61 @@ def print_lowest_energies(filepaths, n=10, figsize=(8, 5), figpath=None, dpi=100
         plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
     plt.show()
     
-def print_energies_momentum(filepath, figsize=(4.5,5.5), dpi=100):
+def print_energies_momentum(filepath, figsize=(4.5,5.5), figpath=None, dpi=100):
     """Print and plot eigenvalues from momentum results file."""
     data = np.loadtxt(filepath, delimiter=',')
     energies = data[:, 0]
+    sz_values = data[:, 1]
     k_values = data[:, 2]
-    sz_values = data[:, 3]
+    k_over_pi = data[:, 3]
     
-    print(f"\nMomentum eigenvalues ({len(energies)} total states)")
-    print(f"  {'k':>12}  {'E':>12}")
-    print(f"  {'---':>12}  {'---':>12}")
-    for k, e in zip(k_values, energies):
-        print(f"  {k:>12.6f}  {e:>12.6f}")
-    
+    if len(energies) <= 16:
+        print(f"\nMomentum eigenvalues ({len(energies)} total states)")
+        print(f"  {'S_z':>6}  {'k/pi':>8}  {'E':>12}")
+        print(f"  {'---':>6}  {'---':>8}  {'---':>12}")
+        for sz, kp, e in zip(sz_values, k_over_pi, energies):
+            print(f"  {sz:>6.1f}  {kp:>8.4f}  {e:>12.6f}")
+    else: 
+        print(f"\nMomentum eigenvalues ({len(energies)} total states)")
+        print(f"  {'S_z':>6}  {'k/pi':>8}  {'E':>12}")
+        print(f"  {'---':>6}  {'---':>8}  {'---':>12}")
+        for sz, kp, e in zip(sz_values[0:10], k_over_pi[0:10], energies[0:10]):
+            print(f"  {sz:>6.1f}  {kp:>8.4f}  {e:>12.6f}")
+
+    # Spread degenerate points horizontally so each dot is visible
+    k_plot = k_over_pi.copy()
+    # Group by (k_rounded, E_rounded) and offset within each group
+    k_round = np.round(k_over_pi, 6)
+    e_round = np.round(energies, 6)
+    spread = 0.06  # horizontal offset between degenerate dots
+    visited = {}
+    for i in range(len(k_plot)):
+        key = (k_round[i], e_round[i])
+        if key not in visited:
+            visited[key] = []
+        visited[key].append(i)
+    for key, indices in visited.items():
+        n = len(indices)
+        if n > 1:
+            offsets = np.linspace(-spread * (n - 1) / 2, spread * (n - 1) / 2, n)
+            for j, idx in enumerate(indices):
+                k_plot[idx] += offsets[j]
+
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    ax.scatter(k_values, energies, c = sz_values, cmap='magma', s=30, zorder=2)
-    ax.set_xlabel('Momentum $k$')
-    ax.set_ylabel('Energy $E$')
-    ax.set_title('Momentum Eigenvalues')
+    sc = ax.scatter(k_plot, energies, c=sz_values, cmap='viridis',
+                    edgecolors='k', linewidths=0.3, s=40, zorder=2)
+    cbar = plt.colorbar(sc, ax=ax)
+    all_integer = np.all(np.isclose(sz_values, np.round(sz_values)))
+    if all_integer:
+        cbar.set_ticks(np.arange(sz_values.min(), sz_values.max() + 1))
+    cbar.set_label(r'$S_z$')
+    ax.set_xticks(np.unique(np.round(k_over_pi, 6)))
+    ax.set_xlabel(r'$k (\pi)$')
+    ax.set_ylabel(r'E (eV)')
+    ax.tick_params(direction='in', which='both')
     ax.grid(True, linestyle='--', alpha=0.25)
-    
+
     plt.tight_layout()
+    if figpath:
+        plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
     plt.show()

@@ -44,11 +44,19 @@ if __name__ == '__main__':
                             "If not given, uses uniform S for all sites.")
     parser.add_argument("--momentum", action="store_true",
                         help="Use momentum subspaces (requires --mixed, PBC, uniform spins)")
+    parser.add_argument("--bloch", action="store_true",
+                        help="Use Bloch (orbit-based) momentum diagonalization instead of Schur")
     args = parser.parse_args()
 
     boundary = args.boundary
     model = args.model
     use_mixed = args.mixed
+
+    # --bloch implies --momentum --mixed
+    if args.bloch:
+        args.momentum = True
+    if args.momentum:
+        use_mixed = True
 
     # When --spin-sizes is given, N and S are inferred from it
     if args.spin_sizes is not None:
@@ -146,25 +154,59 @@ if __name__ == '__main__':
         assert boundary == "PBC", "--momentum requires PBC boundary conditions"
         assert len(set(H.spin_sizes)) == 1, "--momentum requires uniform spins (all sites same S)"
 
-        H.build_translation_operator()
-        all_results = H.momentum_diagonalize_all()
+        use_bloch = args.bloch
+        if not use_bloch:
+            H.build_translation_operator()
 
-        # Collect into flat arrays for saving
+        # For odd N: A gets the extra site (A >= B)
+        size_of_sub_A = math.ceil(N / 2)
+        size_of_sub_B = N - size_of_sub_A
+
         mom_energies = []
         mom_sz = []
         mom_k = []
         mom_k_over_pi = []
-        for sz, k, energies in all_results:
-            for e in energies:
-                mom_energies.append(e)
-                mom_sz.append(sz)
-                mom_k.append(k)
-                mom_k_over_pi.append(k / np.pi)
+        mom_entropy_norm = []
+        mom_entropy_raw = []
 
-        mom_data = np.column_stack([mom_energies, mom_sz, mom_k, mom_k_over_pi])
+        for i, spin in enumerate(spins):
+            if use_bloch:
+                (results, vectors, energies, k_labels,
+                 spin_basis) = H.momentum_diagonalize_bloch(i)
+            else:
+                (results, vectors, energies, k_labels,
+                 spin_basis) = H.momentum_diagonalize(i)
+
+            # Subsystem A/B basis for this Sz sector
+            subsystem_A, subsystem_B, new_basis = H.subsystems_fixed_s_z(
+                spin_basis, size_of_sub_A, size_of_sub_B)
+
+            # Compute entropy for each eigenstate
+            for j in range(len(energies)):
+                psi = np.zeros((len(subsystem_A), len(subsystem_B)), dtype=complex)
+                for idx, v in enumerate(vectors[:, j]):
+                    psi[new_basis[idx][0]][new_basis[idx][1]] = v
+
+                rho = np.dot(psi, psi.conj().T)
+
+                if abs(np.trace(rho) - 1.0) > TRACE_TOLERANCE:
+                    print(f"  Warning: Tr(rho)={np.trace(rho):.6f} for "
+                          f"Sz={spins[i]}, k={k_labels[j]:.4f}, E={energies[j]:.6f}")
+
+                entropy_norm, entropy_raw, _ = H.calculate_entropy(rho, size_of_sub_A)
+
+                mom_energies.append(energies[j])
+                mom_sz.append(spins[i])
+                mom_k.append(k_labels[j])
+                mom_k_over_pi.append(k_labels[j] / np.pi)
+                mom_entropy_norm.append(entropy_norm)
+                mom_entropy_raw.append(entropy_raw)
+
+        mom_data = np.column_stack([mom_energies, mom_sz, mom_k, mom_k_over_pi,
+                                    mom_entropy_norm, mom_entropy_raw])
         np.savetxt(dir_name + "/momentum_" + S_save + "_" + str(N) + ".csv",
-                   mom_data, delimiter=',',
-                   header="Energy, S_z, k, k_over_pi")
+                   np.real(mom_data), delimiter=',',
+                   header="Energy, S_z, k, k_over_pi, Entropy_normalized, Entropy_raw")
 
         print(f"Momentum results saved: {len(mom_energies)} states")
         print("Success")

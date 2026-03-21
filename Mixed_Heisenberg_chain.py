@@ -14,6 +14,7 @@
 import numpy as np
 from itertools import product
 import scipy.sparse
+import scipy.linalg
 
 ZERO_THRESHOLD  = 1e-8
 TRACE_TOLERANCE = 1e-12
@@ -23,7 +24,7 @@ def build_spin_operators(s):
     """Build S+, S-, Sz, I matrices for arbitrary spin s.
     Basis ordered: m = s, s-1, ..., -s (descending).
     Uses: S+|s,m> = sqrt(s(s+1) - m(m+1)) |s,m+1>
-          S-|s,m> = sqrt(s(s+1) - m(m-1)) |s,m-1>
+            S-|s,m> = sqrt(s(s+1) - m(m-1)) |s,m-1>
     """
     dim = int(2*s + 1)
     S_plus = np.zeros((dim, dim))
@@ -161,8 +162,9 @@ class MixedHeisenberg:
 
         print(f"Hamiltonian dimension: {dim}")
 
-    def create_Hamiltonian_AKLT(self, J_x, J_y, J_z):
-        """AKLT: H = sum_{<i,j>} [h_ij + 1/3 h_ij^2] where h_ij = S_i . S_j.
+    def create_Hamiltonian_AKLT(self, J_x, J_y, J_z, beta=1.0/3.0):
+        """H = sum_{<i,j>} [h_ij + beta * h_ij^2] where h_ij = S_i . S_j.
+        beta=0: pure Heisenberg. beta=1/3: AKLT point.
         Bonds determined by upper triangle of J matrices (i < j with nonzero entry)."""
         N = self.size_of_system
         J_x = np.asarray(J_x, dtype=float)
@@ -184,12 +186,48 @@ class MixedHeisenberg:
         for i in range(N):
             for j in range(i+1, N):
                 if abs(J_x[i, j]) > 0 or abs(J_y[i, j]) > 0 or abs(J_z[i, j]) > 0:
-                    #+1/2 before the hamiltonian!
                     h_ij = 0.5 * (Sp[i].dot(Sm[j]) + Sm[i].dot(Sp[j])) \
                             + Sz[i].dot(Sz[j])
-                    self.H += h_ij + (1.0/3.0) * h_ij.dot(h_ij)
+                    self.H += h_ij + beta * h_ij.dot(h_ij)
 
-        print(f"Hamiltonian dimension: {dim}")
+        print(f"Hamiltonian dimension: {dim}, beta={beta:.4f}")
+
+    def build_bilinear_biquadratic(self, J_x, J_y, J_z):
+        """Precompute H_bilinear and H_biquadratic separately.
+        H(beta) = H_bilinear + beta * H_biquadratic
+        Use with set_hamiltonian_from_beta() for efficient parameter sweeps."""
+        N = self.size_of_system
+        J_x = np.asarray(J_x, dtype=float)
+        J_y = np.asarray(J_y, dtype=float)
+        J_z = np.asarray(J_z, dtype=float)
+
+        for name, J in [("J_x", J_x), ("J_y", J_y), ("J_z", J_z)]:
+            assert J.shape == (N, N), \
+                f"{name} shape {J.shape} does not match chain size N={N}"
+
+        dim = self.total_dim
+        Sp = [self.S_site(k, self.site_ops[k]['S_plus']) for k in range(N)]
+        Sm = [self.S_site(k, self.site_ops[k]['S_minus']) for k in range(N)]
+        Sz = [self.S_site(k, self.site_ops[k]['S_z']) for k in range(N)]
+
+        self.H_bilinear = scipy.sparse.csr_matrix((dim, dim), dtype=float)
+        self.H_biquadratic = scipy.sparse.csr_matrix((dim, dim), dtype=float)
+
+        for i in range(N):
+            for j in range(i+1, N):
+                if abs(J_x[i, j]) > 0 or abs(J_y[i, j]) > 0 or abs(J_z[i, j]) > 0:
+                    h_ij = 0.5 * (Sp[i].dot(Sm[j]) + Sm[i].dot(Sp[j])) \
+                            + Sz[i].dot(Sz[j])
+                    self.H_bilinear += h_ij
+                    self.H_biquadratic += h_ij.dot(h_ij)
+
+        print(f"Bilinear + biquadratic built: dim={dim}")
+
+    def set_hamiltonian_from_beta(self, beta):
+        """Set self.H = H_bilinear + beta * H_biquadratic.
+        Call build_bilinear_biquadratic() first."""
+        assert hasattr(self, 'H_bilinear'), "Call build_bilinear_biquadratic() first"
+        self.H = self.H_bilinear + beta * self.H_biquadratic
 
     def eig_diagonalize(self, A):
         if scipy.sparse.issparse(A):
@@ -200,7 +238,7 @@ class MixedHeisenberg:
         eigenVectors = eigenVectors[:, idx]
         return eigenValues, eigenVectors
 
-    def block_Hamiltonian(self, iterator):
+    def block_Hamiltonian(self, iterator, verbose=True):
         target_spin = self.list_of_spins[iterator]
         row_indices = [i for i, sz in enumerate(self.basis_s_z)
                         if abs(sz - target_spin) < 1e-12]
@@ -209,9 +247,10 @@ class MixedHeisenberg:
         H_dense = self.H.toarray() if scipy.sparse.issparse(self.H) else self.H
         block_H_spin = H_dense[np.ix_(row_indices, row_indices)]
 
-        print(f"Block S_z={target_spin}: size {block_H_spin.shape[0]}x{block_H_spin.shape[1]}")
+        if verbose:
+            print(f"Block S_z={target_spin}: size {block_H_spin.shape[0]}x{block_H_spin.shape[1]}")
 
-        if self.size_of_system <= 6:
+        if verbose and self.size_of_system <= 6:
             print(block_H_spin)
 
         if np.iscomplexobj(block_H_spin) and np.allclose(block_H_spin.imag, 0):
@@ -256,6 +295,39 @@ class MixedHeisenberg:
         spin_basis = [self.basis[i] for i in row_indices]
         return row_indices, spin_basis
 
+    def _find_orbits(self, spin_basis):
+        """Group spin_basis states into translation orbits.
+
+        Returns list of dicts with keys:
+          'rep': index in spin_basis of orbit representative
+          'length': orbit length L_alpha
+          'indices': list of spin_basis indices [T^0, T^1, ..., T^{L-1}]
+        """
+        config_to_local = {cfg: idx for idx, cfg in enumerate(spin_basis)}
+        visited = set()
+        orbits = []
+
+        for i, cfg in enumerate(spin_basis):
+            if i in visited:
+                continue
+            orbit_indices = []
+            current = cfg
+            while True:
+                local_idx = config_to_local[current]
+                if local_idx in visited:
+                    break
+                visited.add(local_idx)
+                orbit_indices.append(local_idx)
+                current = (current[-1],) + current[:-1]  # apply T
+
+            orbits.append({
+                'rep': orbit_indices[0],
+                'length': len(orbit_indices),
+                'indices': orbit_indices,
+            })
+
+        return orbits
+
     def block_translation_operator(self, iterator):
         """Extract T block for Sz sector `iterator`.
         Returns: T_Sz (dense matrix), row_indices"""
@@ -295,16 +367,21 @@ class MixedHeisenberg:
         # Get T_Sz block
         block_T, _ = self.block_translation_operator(iterator)
 
-        # Diagonalize T_Sz
-        T_evals, T_evecs = np.linalg.eig(block_T)
+        # Diagonalize T_Sz using Schur decomposition
+        # np.linalg.eig does NOT guarantee orthonormal eigenvectors for
+        # degenerate eigenvalues.  T is unitary (hence normal), so the Schur
+        # decomposition T = Q D Q† gives a unitary Q whose columns are
+        # orthonormal eigenvectors — essential for a valid basis rotation.
+        T_schur, T_evecs = scipy.linalg.schur(block_T, output='complex')
+        T_evals = np.diag(T_schur)
 
         # Extract k from eigenvalues e^{ik}
         k_values = np.angle(T_evals)
 
         # Round to allowed k = 2*pi*m / N, m = 0, 1, ..., N-1
-        # shifted to [-pi, pi)
+        # Convention: k in (-pi, pi]
         allowed_k = np.array([2 * np.pi * m / N for m in range(N)])
-        allowed_k = (allowed_k + np.pi) % (2 * np.pi) - np.pi
+        allowed_k = np.where(allowed_k > np.pi, allowed_k - 2 * np.pi, allowed_k)
 
         k_assigned = np.zeros_like(k_values)
         for idx, kv in enumerate(k_values):
@@ -320,8 +397,12 @@ class MixedHeisenberg:
         H_rotated = U_Sz.conj().T @ H_Sz @ U_Sz
 
         # Extract and diagonalize each k-block
+        # Recover eigenvectors in the Sz-sector product basis
         unique_k = np.unique(np.round(k_sorted, 10))
         results = []
+        all_vectors_Sz = []
+        all_energies = []
+        all_k_labels = []
         for k in unique_k:
             k_mask = np.abs(k_sorted - k) < 1e-10
             k_indices = np.where(k_mask)[0]
@@ -332,16 +413,120 @@ class MixedHeisenberg:
 
             if H_k.shape[0] == 1:
                 e_k = np.array([np.real(H_k[0, 0])])
+                V_k = np.array([[1.0]])
             else:
-                e_k = np.sort(np.real(np.linalg.eigvalsh(H_k)))
+                e_k, V_k = np.linalg.eigh(H_k)
+                idx = e_k.argsort()
+                e_k = np.real(e_k[idx])
+                V_k = V_k[:, idx]
+
+            # Transform back to Sz-sector product basis
+            vectors_Sz = U_Sz[:, k_indices] @ V_k
 
             results.append((k, e_k))
+            for j in range(len(e_k)):
+                all_vectors_Sz.append(vectors_Sz[:, j])
+                all_energies.append(e_k[j])
+                all_k_labels.append(k)
 
         print(f"  S_z={target_spin}: {len(row_indices)} states -> "
-              f"{len(unique_k)} k-sectors: "
+            f"{len(unique_k)} k-sectors: "
+            + ", ".join(f"k={k:.4f}({len(e)})" for k, e in results))
+
+        # Columns = eigenvectors (same layout as block_Hamiltonian)
+        all_vectors_Sz = np.column_stack(all_vectors_Sz)
+
+        return (results, all_vectors_Sz, np.array(all_energies),
+                np.array(all_k_labels), spin_basis)
+
+    def momentum_diagonalize_bloch(self, iterator):
+        """Bloch (orbit-based) momentum diagonalization for Sz sector `iterator`.
+
+        Instead of diagonalizing T numerically, constructs momentum eigenstates
+        analytically from translation orbits:
+          |alpha, k> = (1/sqrt(L_alpha)) sum_{r=0}^{L-1} e^{-ikr} T^r|alpha>
+
+        Returns same interface as momentum_diagonalize:
+          (results, all_vectors_Sz, energies, k_labels, spin_basis)
+        """
+        assert len(set(self.spin_sizes)) == 1, \
+            "Bloch momentum diagonalization requires uniform spins"
+        N = self.size_of_system
+        target_spin = self.list_of_spins[iterator]
+
+        # 1. Get Sz block of H
+        row_indices, spin_basis = self._get_sz_block_indices(iterator)
+        H_dense = self.H.toarray() if scipy.sparse.issparse(self.H) else self.H
+        H_Sz = H_dense[np.ix_(row_indices, row_indices)]
+        if np.iscomplexobj(H_Sz) and np.allclose(H_Sz.imag, 0):
+            H_Sz = H_Sz.real
+        dim_sz = len(spin_basis)
+
+        # 2. Find orbits
+        orbits = self._find_orbits(spin_basis)
+
+        # 3. Allowed k values with integer index (avoids floating-point issues)
+        allowed_k_info = []
+        for m in range(N):
+            k = 2 * np.pi * m / N
+            if k > np.pi:
+                k -= 2 * np.pi
+            allowed_k_info.append((k, m))
+        allowed_k_info.sort(key=lambda x: x[0])
+
+        # 4. For each k, build Bloch basis, compute H_k, diagonalize
+        results = []
+        all_vectors_Sz = []
+        all_energies = []
+        all_k_labels = []
+
+        for k, m in allowed_k_info:
+            # Compatible orbits: (m * L) % N == 0
+            compatible = [orb for orb in orbits if (m * orb['length']) % N == 0]
+
+            if len(compatible) == 0:
+                continue
+
+            # Build change-of-basis matrix W: dim_sz x n_bloch
+            n_bloch = len(compatible)
+            W = np.zeros((dim_sz, n_bloch), dtype=complex)
+            for col, orb in enumerate(compatible):
+                L = orb['length']
+                norm = 1.0 / np.sqrt(L)
+                for r, idx in enumerate(orb['indices']):
+                    W[idx, col] = norm * np.exp(-1j * k * r)
+
+            # H in Bloch basis
+            H_k = W.conj().T @ H_Sz @ W
+            H_k = 0.5 * (H_k + H_k.conj().T)
+
+            # Diagonalize
+            if H_k.shape[0] == 1:
+                e_k = np.array([np.real(H_k[0, 0])])
+                V_k = np.array([[1.0]])
+            else:
+                e_k, V_k = np.linalg.eigh(H_k)
+                idx_sort = e_k.argsort()
+                e_k = np.real(e_k[idx_sort])
+                V_k = V_k[:, idx_sort]
+
+            # Transform back to product basis
+            vectors_Sz = W @ V_k
+
+            results.append((k, e_k))
+            for j in range(len(e_k)):
+                all_vectors_Sz.append(vectors_Sz[:, j])
+                all_energies.append(e_k[j])
+                all_k_labels.append(k)
+
+        print(f"  S_z={target_spin}: {dim_sz} states -> "
+              f"{len(results)} k-sectors (Bloch): "
               + ", ".join(f"k={k:.4f}({len(e)})" for k, e in results))
 
-        return results, H_rotated, U_Sz, k_sorted
+        all_vectors_Sz = np.column_stack(all_vectors_Sz)
+
+        return (results, all_vectors_Sz, np.array(all_energies),
+                np.array(all_k_labels), spin_basis)
 
     def momentum_diagonalize_all(self):
         """Run momentum diagonalization for all Sz sectors.
@@ -350,7 +535,7 @@ class MixedHeisenberg:
         all_results = []
         for i in range(len(self.list_of_spins)):
             sz = self.list_of_spins[i]
-            results, _, _, _ = self.momentum_diagonalize(i)
+            results, _, _, _, _ = self.momentum_diagonalize(i)
             for k, energies in results:
                 all_results.append((sz, k, energies))
         return all_results
