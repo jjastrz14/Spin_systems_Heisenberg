@@ -328,3 +328,307 @@ def print_energies_momentum(filepath, figsize=(4.5,5.5), figpath=None, dpi=100):
     if figpath:
         plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
     plt.show()
+
+
+def plot_beta_sweep_entropy(sweep_dir, sz_filter=0, n_lowest=1, figsize=(8, 5),
+                            figpath=None, dpi=100, entropy='normalized',
+                            xlim=None, ylim=None):
+    """Plot entropy vs beta for n lowest eigenvalues in a given Sz sector.
+
+    Reads all results_beta_*.csv files from sweep_dir.
+    Each dot = one eigenstate at one beta value, colored by beta.
+
+    Parameters
+    ----------
+    sweep_dir : str
+        Directory with results_beta_*.csv files.
+    sz_filter : float
+        S_z value to filter (default 0).
+    n_lowest : int
+        Number of lowest eigenvalues to show per beta (default 1).
+    entropy : str
+        'normalized' or 'raw'.
+    """
+    import glob, os, re
+
+    # Find and sort files by beta value
+    pattern = os.path.join(sweep_dir, 'results_beta_*.csv')
+    files = sorted(glob.glob(pattern))
+
+    if len(files) == 0:
+        print(f"No files found in {sweep_dir}")
+        return
+
+    entropy_col = 1 if entropy == 'normalized' else 2
+
+    all_betas = []
+    all_energies = []
+    all_entropies = []
+    all_state_idx = []
+
+    for f in files:
+        # Extract beta from filename: results_beta_0.1500_1_10.csv
+        match = re.search(r'results_beta_([\d.]+)_', os.path.basename(f))
+        if match is None:
+            continue
+        beta = float(match.group(1))
+
+        try:
+            data = np.loadtxt(f, delimiter=',')
+        except ValueError:
+            data = np.loadtxt(f)
+
+        # Filter by Sz
+        mask = np.isclose(data[:, 3], sz_filter)
+        if not np.any(mask):
+            continue
+
+        sector = data[mask]
+        # Sort by energy
+        order = np.argsort(sector[:, 0])
+        sector = sector[order]
+
+        for j in range(min(n_lowest, len(sector))):
+            all_betas.append(beta)
+            all_energies.append(sector[j, 0])
+            all_entropies.append(sector[j, entropy_col])
+            all_state_idx.append(j)
+
+    all_betas = np.array(all_betas)
+    all_energies = np.array(all_energies)
+    all_entropies = np.array(all_entropies)
+    all_state_idx = np.array(all_state_idx)
+
+    # --- Plot 1: Entropy vs beta, one line per state index ---
+    fig, axes = plt.subplots(1, 2, figsize=(figsize[0] * 2, figsize[1]), dpi=dpi)
+
+    # Left panel: Entropy vs beta
+    ax = axes[0]
+    cmap_lines = plt.colormaps.get_cmap('viridis').resampled(max(n_lowest, 2))
+    for j in range(n_lowest):
+        mask_j = all_state_idx == j
+        if not np.any(mask_j):
+            continue
+        betas_j = all_betas[mask_j]
+        ent_j = all_entropies[mask_j]
+        order = np.argsort(betas_j)
+        color = cmap_lines(j / max(n_lowest - 1, 1))
+        ax.plot(betas_j[order], ent_j[order], 'o-', color=color,
+                markersize=3, linewidth=1, label=f'state {j}')
+
+    ax.set_xlabel(r'$\beta$')
+    ax.set_ylabel(r'Entropy $S$')
+    ax.set_title(rf'$S_z = {sz_filter:.0f}$, {n_lowest} lowest')
+    ax.legend(fontsize='small')
+    ax.tick_params(direction='in', which='both')
+    ax.grid(True, linestyle='--', alpha=0.25)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
+    # Right panel: Energy vs beta
+    ax2 = axes[1]
+    for j in range(n_lowest):
+        mask_j = all_state_idx == j
+        if not np.any(mask_j):
+            continue
+        betas_j = all_betas[mask_j]
+        en_j = all_energies[mask_j]
+        order = np.argsort(betas_j)
+        color = cmap_lines(j / max(n_lowest - 1, 1))
+        ax2.plot(betas_j[order], en_j[order], 'o-', color=color,
+                 markersize=3, linewidth=1, label=f'state {j}')
+
+    ax2.set_xlabel(r'$\beta$')
+    ax2.set_ylabel(r'Energy $E$')
+    ax2.set_title(rf'$S_z = {sz_filter:.0f}$, {n_lowest} lowest')
+    ax2.legend(fontsize='small')
+    ax2.tick_params(direction='in', which='both')
+    ax2.grid(True, linestyle='--', alpha=0.25)
+
+    plt.tight_layout()
+    if figpath:
+        plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
+    plt.show()
+
+    # Print summary table
+    unique_betas = np.unique(all_betas)
+    print(f"\n{'beta':>8}", end="")
+    for j in range(n_lowest):
+        print(f"  {'E_'+str(j):>12} {'S_'+str(j):>10}", end="")
+    print()
+    print("-" * (8 + n_lowest * 24))
+    for beta in unique_betas:
+        print(f"{beta:>8.4f}", end="")
+        for j in range(n_lowest):
+            mask = (np.isclose(all_betas, beta)) & (all_state_idx == j)
+            if np.any(mask):
+                idx = np.where(mask)[0][0]
+                print(f"  {all_energies[idx]:>12.6f} {all_entropies[idx]:>10.6f}", end="")
+            else:
+                print(f"  {'---':>12} {'---':>10}", end="")
+        print()
+
+
+def plot_beta_sweep_entropy_vs_energy(sweep_dir, sz_filter=0, n_lowest=None,
+                                      figsize=(6, 5), figpath=None, dpi=100,
+                                      entropy='normalized', xlim=None, ylim=None):
+    """Scatter plot of entropy vs energy, colored by beta.
+
+    Parameters
+    ----------
+    sweep_dir : str
+        Directory with results_beta_*.csv files.
+    sz_filter : float
+        S_z value to filter (default 0).
+    n_lowest : int or None
+        If set, only show n lowest eigenvalues per beta. None = all states.
+    entropy : str
+        'normalized' or 'raw'.
+    """
+    import glob, os, re
+
+    pattern = os.path.join(sweep_dir, 'results_beta_*.csv')
+    files = sorted(glob.glob(pattern))
+
+    if len(files) == 0:
+        print(f"No files found in {sweep_dir}")
+        return
+
+    entropy_col = 1 if entropy == 'normalized' else 2
+
+    all_betas = []
+    all_energies = []
+    all_entropies = []
+
+    for f in files:
+        match = re.search(r'results_beta_([\d.]+)_', os.path.basename(f))
+        if match is None:
+            continue
+        beta = float(match.group(1))
+
+        try:
+            data = np.loadtxt(f, delimiter=',')
+        except ValueError:
+            data = np.loadtxt(f)
+
+        mask = np.isclose(data[:, 3], sz_filter)
+        if not np.any(mask):
+            continue
+
+        sector = data[mask]
+        order = np.argsort(sector[:, 0])
+        sector = sector[order]
+
+        if n_lowest is not None:
+            sector = sector[:n_lowest]
+
+        for row in sector:
+            all_betas.append(beta)
+            all_energies.append(row[0])
+            all_entropies.append(row[entropy_col])
+
+    all_betas = np.array(all_betas)
+    all_energies = np.array(all_energies)
+    all_entropies = np.array(all_entropies)
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    sc = ax.scatter(all_energies, all_entropies, c=all_betas, cmap='coolwarm',
+                    edgecolors='k', linewidths=0.2, s=15,
+                    vmin=all_betas.min(), vmax=all_betas.max())
+    cbar = plt.colorbar(sc, ax=ax)
+    cbar.set_label(r'$\beta$')
+    ax.set_xlabel(r'Energy $E$')
+    ax.set_ylabel(r'Entropy $S$')
+    title = rf'$S_z = {sz_filter:.0f}$'
+    if n_lowest is not None:
+        title += rf', {n_lowest} lowest'
+    ax.set_title(title)
+    ax.tick_params(direction='in', which='both')
+    ax.grid(True, linestyle='--', alpha=0.25)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    plt.tight_layout()
+    if figpath:
+        plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
+    plt.show()
+
+
+def plot_beta_sweep_entropy_sum(sweep_dir, sz_filter=0, figsize=(6, 4),
+                                figpath=None, dpi=100, entropy='normalized',
+                                xlim=None, ylim=None):
+    """Plot sum of entropies over all states in a given Sz sector vs beta.
+
+    Parameters
+    ----------
+    sweep_dir : str
+        Directory with results_beta_*.csv files.
+    sz_filter : float or list of float
+        S_z value(s) to plot. If list, one line per Sz value.
+    entropy : str
+        'normalized' or 'raw'.
+    """
+    import glob, os, re
+
+    if not isinstance(sz_filter, (list, np.ndarray)):
+        sz_filter = [sz_filter]
+
+    pattern = os.path.join(sweep_dir, 'results_beta_*.csv')
+    files = sorted(glob.glob(pattern))
+
+    if len(files) == 0:
+        print(f"No files found in {sweep_dir}")
+        return
+
+    entropy_col = 1 if entropy == 'normalized' else 2
+
+    data_per_sz = {sz: {'betas': [], 'sums': []} for sz in sz_filter}
+
+    for f in files:
+        match = re.search(r'results_beta_([\d.]+)_', os.path.basename(f))
+        if match is None:
+            continue
+        beta = float(match.group(1))
+
+        try:
+            data = np.loadtxt(f, delimiter=',')
+        except ValueError:
+            data = np.loadtxt(f)
+
+        for sz in sz_filter:
+            mask = np.isclose(data[:, 3], sz)
+            if not np.any(mask):
+                continue
+            ent_sum = np.sum(data[mask, entropy_col])
+            data_per_sz[sz]['betas'].append(beta)
+            data_per_sz[sz]['sums'].append(ent_sum)
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    cmap_lines = plt.colormaps.get_cmap('tab10').resampled(max(len(sz_filter), 2))
+
+    for idx, sz in enumerate(sz_filter):
+        betas = np.array(data_per_sz[sz]['betas'])
+        sums = np.array(data_per_sz[sz]['sums'])
+        if len(betas) == 0:
+            continue
+        order = np.argsort(betas)
+        color = cmap_lines(idx / max(len(sz_filter) - 1, 1))
+        ax.plot(betas[order], sums[order], 'o-', color=color,
+                markersize=4, linewidth=1.5, label=rf'$S_z = {sz:.0f}$')
+
+    ax.set_xlabel(r'$\beta$')
+    ax.set_ylabel(r'$\sum S$')
+    ax.legend(fontsize='small')
+    ax.tick_params(direction='in', which='both')
+    ax.grid(True, linestyle='--', alpha=0.25)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    plt.tight_layout()
+    if figpath:
+        plt.savefig(figpath, dpi=dpi, bbox_inches='tight')
+    plt.show()
