@@ -473,7 +473,7 @@ def plot_beta_sweep_entropy(sweep_dir, sz_filter=0, n_lowest=1, figsize=(8, 5),
 
 def plot_beta_sweep_entropy_vs_energy(sweep_dir, sz_filter=0, n_lowest=None,
                                       figsize=(6, 5), figpath=None, dpi=100,
-                                      entropy='normalized', xlim=None, ylim=None):
+                                      entropy='normalized', xlim=None, ylim=None, momentum=False):
     """Scatter plot of entropy vs energy, colored by beta.
 
     Parameters
@@ -488,22 +488,35 @@ def plot_beta_sweep_entropy_vs_energy(sweep_dir, sz_filter=0, n_lowest=None,
         'normalized' or 'raw'.
     """
     import glob, os, re
-
-    pattern = os.path.join(sweep_dir, 'results_beta_*.csv')
+    if momentum:
+        pattern = os.path.join(sweep_dir, 'momentum_beta_*.csv')
+    else:
+        pattern = os.path.join(sweep_dir, 'results_beta_*.csv')
     files = sorted(glob.glob(pattern))
 
     if len(files) == 0:
         print(f"No files found in {sweep_dir}")
         return
 
-    entropy_col = 1 if entropy == 'normalized' else 2
-
     all_betas = []
     all_energies = []
     all_entropies = []
 
+    if momentum:
+        sz_col = 1
+        enorm_col = 4
+        eraw_col = 5
+        fname_re = r'(?:momentum|results)_beta_([\d.]+)_'
+    else:
+        sz_col = 3
+        enorm_col = 1
+        eraw_col = 2
+        fname_re = r'results_beta_([\d.]+)_'
+
+    entropy_col = enorm_col if entropy == 'normalized' else eraw_col
+
     for f in files:
-        match = re.search(r'results_beta_([\d.]+)_', os.path.basename(f))
+        match = re.search(fname_re, os.path.basename(f))
         if match is None:
             continue
         beta = float(match.group(1))
@@ -513,7 +526,7 @@ def plot_beta_sweep_entropy_vs_energy(sweep_dir, sz_filter=0, n_lowest=None,
         except ValueError:
             data = np.loadtxt(f)
 
-        mask = np.isclose(data[:, 3], sz_filter)
+        mask = np.isclose(data[:, sz_col], sz_filter)
         if not np.any(mask):
             continue
 
@@ -559,36 +572,46 @@ def plot_beta_sweep_entropy_vs_energy(sweep_dir, sz_filter=0, n_lowest=None,
 
 def plot_beta_sweep_entropy_sum(sweep_dir, sz_filter=0, figsize=(6, 4),
                                 figpath=None, dpi=100, entropy='normalized',
-                                xlim=None, ylim=None):
+                                xlim=None, ylim=None, momentum=False):
     """Plot sum of entropies over all states in a given Sz sector vs beta.
 
     Parameters
     ----------
     sweep_dir : str
-        Directory with results_beta_*.csv files.
+        Directory with results_beta_*.csv or momentum_beta_*.csv files.
     sz_filter : float or list of float
         S_z value(s) to plot. If list, one line per Sz value.
     entropy : str
         'normalized' or 'raw'.
+    momentum : bool
+        If True, read momentum CSV files (columns: E, Sz, k, k/pi, Enorm, Eraw).
     """
     import glob, os, re
 
     if not isinstance(sz_filter, (list, np.ndarray)):
         sz_filter = [sz_filter]
 
-    pattern = os.path.join(sweep_dir, 'results_beta_*.csv')
+    if momentum:
+        pattern = os.path.join(sweep_dir, 'momentum_beta_*.csv')
+        sz_col = 1
+        entropy_col = 4 if entropy == 'normalized' else 5
+        fname_re = r'(?:momentum|results)_beta_([\d.]+)_'
+    else:
+        pattern = os.path.join(sweep_dir, 'results_beta_*.csv')
+        sz_col = 3
+        entropy_col = 1 if entropy == 'normalized' else 2
+        fname_re = r'results_beta_([\d.]+)_'
+
     files = sorted(glob.glob(pattern))
 
     if len(files) == 0:
         print(f"No files found in {sweep_dir}")
         return
 
-    entropy_col = 1 if entropy == 'normalized' else 2
-
     data_per_sz = {sz: {'betas': [], 'sums': []} for sz in sz_filter}
 
     for f in files:
-        match = re.search(r'results_beta_([\d.]+)_', os.path.basename(f))
+        match = re.search(fname_re, os.path.basename(f))
         if match is None:
             continue
         beta = float(match.group(1))
@@ -599,7 +622,7 @@ def plot_beta_sweep_entropy_sum(sweep_dir, sz_filter=0, figsize=(6, 4),
             data = np.loadtxt(f)
 
         for sz in sz_filter:
-            mask = np.isclose(data[:, 3], sz)
+            mask = np.isclose(data[:, sz_col], sz)
             if not np.any(mask):
                 continue
             ent_sum = np.sum(data[mask, entropy_col])
